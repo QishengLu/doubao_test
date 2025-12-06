@@ -1,30 +1,30 @@
-Bottleneck
-brotlicffi
-certifi
-cffi
-charset-normalizer
-click
-duckdb
-idna
-mkl-service==2.5.2
-mkl_fft
-mkl_random
-numexpr
-numpy
-openai>=1.0.0
-fastapi
-fastmcp
-uvicorn
-pandas
-pycparser
-PySocks
-python-dateutil
+# Core dependencies
 python-dotenv
-pytz
 PyYAML
 requests
-setuptools
-six
-tzdata
+
+# OpenAI SDK (compatible with Doubao/Volcengine Ark API)
+openai>=1.0.0
+
+# Data processing
+duckdb
+pandas
+numpy
+pyarrow
+
+# MCP Server (optional, if running MCP server)
+fastmcp
+fastapi
+uvicorn
+
+# Utilities
+certifi
+charset-normalizer
+idna
 urllib3
+six
+python-dateutil
+pytz
+tzdata
+setuptools
 wheel

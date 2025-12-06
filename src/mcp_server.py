@@ -7,92 +7,57 @@ from fastmcp import FastMCP
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from tools import list_tables_in_directory, get_schema, query_parquet_files
+from tool_schemas import TOOLS
 
 # Initialize FastMCP
 mcp = FastMCP("RCA Data MCP Server")
 
 @mcp.tool()
-def search(query: str) -> str:
+def list_tables(directory: str = "data") -> str:
     """
-    Search for data tables by keyword, OR execute a SQL query (SELECT ...) to analyze data.
+    List all parquet files in the specified directory with metadata.
+    Returns filename, path, row count, and column count for each file.
     """
-    query_lower = query.lower().strip()
-    
-    # SQL Execution Mode
-    if "select" in query_lower and "from" in query_lower:
-        print(f"[MCP] Executing SQL: {query}")
-        try:
-            # Get all parquet files to register as views
-            tables_json = list_tables_in_directory("data")
-            tables = json.loads(tables_json)
-            
-            all_files = []
-            if isinstance(tables, list):
-                all_files = [f"data/{t['filename']}" for t in tables]
-            
-            # Execute query
-            result = query_parquet_files(all_files, query)
-            
-            return json.dumps({
-                "results": [{
-                    "id": "sql_result",
-                    "title": "SQL Query Result",
-                    "url": "sql://query",
-                    "text": str(result)
-                }]
-            })
-        except Exception as e:
-            return json.dumps({"results": [], "error": str(e)})
-
-    # Keyword Search Mode
-    print(f"[MCP] Searching for: {query}")
+    print(f"[MCP] Listing tables in: {directory}")
     try:
-        tables_json = list_tables_in_directory("data")
-        tables = json.loads(tables_json)
-        
-        results = []
-        if isinstance(tables, list):
-            for table in tables:
-                if not query or query == "all" or query in table['filename'].lower():
-                    results.append({
-                        "id": table['filename'],
-                        "title": table['filename'],
-                        "url": f"file://data/{table['filename']}",
-                    })
-        
-        return json.dumps({"results": results})
+        result = list_tables_in_directory(directory)
+        return result
     except Exception as e:
-        return json.dumps({"results": [], "error": str(e)})
+        return json.dumps({"error": str(e)})
 
 @mcp.tool()
-def fetch(id: str) -> str:
+def get_table_schema(parquet_file: str) -> str:
     """
-    Fetch schema and sample data for a specific file/table ID.
+    Get the schema (column names and types) of a parquet file.
+    Also returns row count and notes about special characters in column names.
     """
-    print(f"[MCP] Fetching: {id}")
+    print(f"[MCP] Getting schema for: {parquet_file}")
     try:
-        # Check if id is a path or just filename
-        file_path = id
-        if not id.startswith("data/") and not os.path.exists(id):
-             if os.path.exists(f"data/{id}"):
-                 file_path = f"data/{id}"
-        
-        schema_json = get_schema(file_path)
-        
-        # Use query tool to get sample data
-        sample_query = f"SELECT * FROM '{file_path}' LIMIT 10"
-        sample_data = query_parquet_files([file_path], sample_query)
-        
-        full_text = f"Schema:\n{schema_json}\n\nSample Data (First 10 rows):\n{sample_data}"
-        
-        result_object = {
-            "id": id,
-            "title": id,
-            "text": full_text,
-            "url": f"file://{file_path}",
-            "metadata": {"source": "local_parquet"}
-        }
-        return json.dumps(result_object)
+        result = get_schema(parquet_file)
+        return result
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+@mcp.tool()
+def query_data(parquet_files: str, query: str) -> str:
+    """
+    Execute SQL queries on parquet files using DuckDB.
+    
+    Args:
+        parquet_files: Comma-separated list of parquet file paths
+        query: SQL query to execute. Use the filename (without .parquet) as table name.
+    
+    Example:
+        parquet_files: "data/logs.parquet,data/metrics.parquet"
+        query: "SELECT * FROM logs WHERE level = 'ERROR' LIMIT 10"
+    """
+    print(f"[MCP] Executing query on files: {parquet_files}")
+    print(f"[MCP] Query: {query}")
+    try:
+        # Parse comma-separated files
+        files = [f.strip() for f in parquet_files.split(",") if f.strip()]
+        result = query_parquet_files(files, query)
+        return result
     except Exception as e:
         return json.dumps({"error": str(e)})
 

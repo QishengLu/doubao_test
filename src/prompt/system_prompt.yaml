@@ -69,22 +69,36 @@ task_description: |
   Root cause service: ts-food-service
 
 tools_description: |
-  You have access to a local data server via the following MCP tools:
+  You have access to the following tools for data analysis:
 
-  1. search(query: str) -> str
-     - **To List Tables:** Pass "all" or a keyword to find relevant parquet files.
-     - **To Execute SQL:** Pass a valid SQL SELECT statement (e.g., "SELECT * FROM 'file.parquet' LIMIT 5").
-       - The server uses DuckDB.
-       - You MUST use the full filename (e.g., 'abnormal_logs.parquet') as the table name in your FROM clause, enclosed in single quotes.
-       - IMPORTANT: If a column name contains dots (e.g., `attr.status_code`), you MUST enclose it in double quotes (e.g., `"attr.status_code"`).
+  1. list_tables_in_directory(directory: str = "data") -> str
+     - List all parquet files in the specified directory with metadata.
+     - Returns: filename, path, row_count, column_count for each file.
+     - Example: list_tables_in_directory("data")
 
-  2. fetch(id: str) -> str
-     - Pass the filename (id) to get the schema and sample data (first 10 rows) of that file.
+  2. get_schema(parquet_file: str) -> str
+     - Get the schema (column names and types) of a parquet file.
+     - Returns: file path, row_count, columns (name and type).
+     - IMPORTANT: If column names contain dots (e.g., `attr.status_code`), you MUST enclose them in double quotes in SQL queries.
+     - Example: get_schema("data/abnormal_logs.parquet")
+
+  3. query_parquet_files(parquet_files: str, query: str) -> str
+     - Execute SQL queries on parquet files using DuckDB.
+     - The parquet files are registered as views using their filenames (without .parquet extension) as table names.
+     - parquet_files: Comma-separated list of parquet file paths.
+     - query: SQL query to execute.
+     - Example: query_parquet_files("data/abnormal_logs.parquet", "SELECT service_name, COUNT(*) FROM abnormal_logs GROUP BY service_name LIMIT 10")
 
 protocol: |
   Protocol:
   1. Think step-by-step.
-  2. Use the `search` tool to explore data and run SQL queries.
-  3. Use the `fetch` tool to inspect file schemas.
-  4. If you have found the root cause, output the final answer in the format:
+  2. Use list_tables_in_directory to discover available data files.
+  3. Use get_schema to understand the structure of each file.
+  4. Use query_parquet_files to run SQL queries for analysis.
+  5. If you have found the root cause, output the final answer in the format:
      Root cause service: [service-name]
+
+user_prompt: |
+  Please conduct a deep research analysis on the RCA problem.
+
+  Start by exploring the available data tables, then analyze them to identify the root cause.

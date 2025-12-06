@@ -2,7 +2,6 @@ import json
 import os
 import sys
 import time
-import requests
 from typing import List, Dict, Any
 from pathlib import Path
 from dotenv import load_dotenv
@@ -15,131 +14,219 @@ load_dotenv()
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from tools import list_tables_in_directory, get_schema, query_parquet_files
-from prompt.system_prompt import get_system_prompt
+from prompt.system_prompt import get_system_prompt, get_user_prompt
+from tool_schemas import TOOLS
 
 class RCAAgent:
     def __init__(self, data_dir: str = "data"):
         self.data_dir = data_dir
-        self.history: List[Dict[str, str]] = []
+        self.history: List[Dict[str, Any]] = []
 
     def execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> str:
-        """Execute a tool call against the MCP server."""
-        mcp_server_url = os.getenv("MCP_SERVER_URL")
-        if not mcp_server_url:
-             return "Error: MCP_SERVER_URL not set."
-        
-        # Remove trailing slash if present
-        mcp_server_url = mcp_server_url.rstrip("/")
-        
+        """Execute a local tool call."""
         try:
             print(f"[Agent] Executing tool: {tool_name} with args: {tool_args}")
-            if tool_name == "search":
-                response = requests.post(f"{mcp_server_url}/mcp/search", json=tool_args)
-                response.raise_for_status()
-                data = response.json()
-                # Extract text content from MCP response
-                if "content" in data and isinstance(data["content"], list):
-                    return data["content"][0]["text"]
-                return json.dumps(data)
-            elif tool_name == "fetch":
-                response = requests.post(f"{mcp_server_url}/mcp/fetch", json=tool_args)
-                response.raise_for_status()
-                data = response.json()
-                if "content" in data and isinstance(data["content"], list):
-                    return data["content"][0]["text"]
-                return json.dumps(data)
+            
+            if tool_name == "list_tables_in_directory":
+                directory = tool_args.get("directory", "data")
+                return list_tables_in_directory(directory)
+            
+            elif tool_name == "get_schema":
+                parquet_file = tool_args.get("parquet_file", "")
+                # Handle comma-separated list
+                if "," in parquet_file:
+                    files = [f.strip() for f in parquet_file.split(",")]
+                else:
+                    files = parquet_file
+                return get_schema(files)
+            
+            elif tool_name == "query_parquet_files":
+                parquet_files = tool_args.get("parquet_files", "")
+                query = tool_args.get("query", "")
+                # Handle comma-separated list
+                if "," in parquet_files:
+                    files = [f.strip() for f in parquet_files.split(",")]
+                else:
+                    files = [parquet_files] if parquet_files else []
+                return query_parquet_files(files, query)
+            
             else:
                 return f"Error: Unknown tool {tool_name}"
         except Exception as e:
             return f"Error executing tool {tool_name}: {e}"
 
-    def call_llm_api(self, prompt: str) -> str:
+    def call_llm_api(self, messages: List[Dict[str, Any]], use_tools: bool = True) -> Dict[str, Any]:
         """
-        Call OpenAI Responses API for Deep Research with MCP.
+        Call Doubao (火山方舟) API with deep thinking mode.
         """
-        print("\n[System] Calling OpenAI Responses API (o3-deep-research)...")
+        print("\n[System] Calling Doubao API (Deep Thinking Mode)...")
         
-        # Use standard OpenAI API Key
-        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("DEEPRESEARCH_API_KEY")
-        mcp_server_url = os.getenv("MCP_SERVER_URL")
+        # Get API Key and model configuration from environment
+        api_key = os.getenv("ARK_API_KEY")
+        base_url = os.getenv("ARK_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
+        model = os.getenv("ARK_MODEL", "doubao-1-5-thinking-pro-250415")
+        thinking_mode = os.getenv("ARK_THINKING_MODE", "enabled")  # enabled, disabled, auto
         
         if not api_key:
-            raise ValueError("Please set OPENAI_API_KEY in .env")
-        if not mcp_server_url:
-            raise ValueError("Please set MCP_SERVER_URL in .env")
-            
-        # Remove trailing slash
-        mcp_server_url = mcp_server_url.rstrip("/")
+            raise ValueError("Please set ARK_API_KEY in .env")
             
         client = OpenAI(
             api_key=api_key,
+            base_url=base_url,
             timeout=3600
         )
         
         try:
-            # The Responses API uses a different structure
-            # We pass the MCP server configuration directly
-            response = client.responses.create(
-                model="o3-deep-research",
-                input=prompt,
-                tools=[
-                    {
-                        "type": "mcp",
-                        "server_label": "rca_data_server",
-                        "server_url": mcp_server_url,
-                        "allowed_tools": ["search", "fetch"],
-                        "require_approval": "never"
+            # Build request parameters
+            request_params = {
+                "model": model,
+                "messages": messages,
+                "extra_body": {
+                    "thinking": {
+                        "type": thinking_mode
                     }
-                ]
-            )
-            return response.output_text
+                }
+            }
+            
+            # Add tools if enabled
+            if use_tools:
+                request_params["tools"] = TOOLS
+                request_params["tool_choice"] = "auto"
+            
+            response = client.chat.completions.create(**request_params)
+            
+            return {
+                "message": response.choices[0].message,
+                "finish_reason": response.choices[0].finish_reason,
+                "usage": response.usage
+            }
         except Exception as e:
             raise Exception(f"API Call failed: {e}")
 
-    def save_history(self, output_path: str = "experiments/openai/output.json"):
+    def save_history(self, output_path: str = "experiments/doubao/output.json"):
         """Save the conversation history to a JSON file."""
         try:
             # Ensure directory exists
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             
             with open(output_path, 'w', encoding='utf-8') as f:
-                json.dump(self.history, f, ensure_ascii=False, indent=2)
+                json.dump(self.history, f, ensure_ascii=False, indent=2, default=str)
             print(f"\n[System] History saved to {output_path}")
         except Exception as e:
             print(f"\n[System] Error saving history: {e}")
 
     def run(self):
-        print("Starting RCA Agent with Deep Research (MCP Mode)...")
-        print("IMPORTANT: Ensure your MCP server is running and exposed via a public URL.")
-        print("Set MCP_SERVER_URL in your .env file.")
+        print("Starting RCA Agent with Doubao Deep Thinking Mode...")
+        print("Using local parquet tools for data analysis.")
         
-        # Initial System Prompt
+        # Load prompts from prompt files
         system_prompt = get_system_prompt()
+        user_prompt = get_user_prompt()
         
-        full_input = f"""
-{system_prompt}
-
-Note on Data Access:
-You have access to a local data server via the 'mcp' tool.
-- To search for tables, use the 'search' tool with keywords.
-- To get table schema and sample data, use the 'fetch' tool with the table filename.
-- **To execute SQL queries**, use the 'search' tool with a valid SQL SELECT statement (e.g., "SELECT * FROM 'table.parquet' LIMIT 5"). The server will detect the SQL syntax and execute it.
-
-Please conduct a deep research analysis on the above problem using the available data tools.
-"""
-        self.history.append({"role": "user", "content": full_input})
+        # Build initial messages
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        self.history.append({"role": "system", "content": system_prompt})
+        self.history.append({"role": "user", "content": user_prompt})
+        
+        max_iterations = 20  # Prevent infinite loops
+        iteration = 0
         
         try:
-            # Call Deep Research (single step)
-            response = self.call_llm_api(full_input)
+            while iteration < max_iterations:
+                iteration += 1
+                print(f"\n[System] Iteration {iteration}/{max_iterations}")
+                
+                # Call LLM
+                response = self.call_llm_api(messages)
+                assistant_message = response["message"]
+                finish_reason = response["finish_reason"]
+                
+                # Check if there are tool calls
+                if hasattr(assistant_message, 'tool_calls') and assistant_message.tool_calls:
+                    # Add assistant message to history
+                    messages.append({
+                        "role": "assistant",
+                        "content": assistant_message.content,
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments
+                                }
+                            } for tc in assistant_message.tool_calls
+                        ]
+                    })
+                    
+                    self.history.append({
+                        "role": "assistant",
+                        "content": assistant_message.content,
+                        "tool_calls": [
+                            {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            } for tc in assistant_message.tool_calls
+                        ]
+                    })
+                    
+                    # Execute each tool call
+                    for tool_call in assistant_message.tool_calls:
+                        tool_name = tool_call.function.name
+                        try:
+                            tool_args = json.loads(tool_call.function.arguments)
+                        except json.JSONDecodeError:
+                            tool_args = {}
+                        
+                        # Execute the tool
+                        tool_result = self.execute_tool(tool_name, tool_args)
+                        
+                        # Add tool result to messages
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": tool_result
+                        })
+                        
+                        self.history.append({
+                            "role": "tool",
+                            "tool_name": tool_name,
+                            "content": tool_result
+                        })
+                        
+                        print(f"[Tool Result] {tool_name}: {tool_result[:500]}...")
+                else:
+                    # No tool calls, this is the final response
+                    final_content = assistant_message.content
+                    
+                    # Check for thinking content if available
+                    if hasattr(assistant_message, 'reasoning_content') and assistant_message.reasoning_content:
+                        print("\n[Thinking Process]")
+                        print(assistant_message.reasoning_content[:2000] + "..." if len(assistant_message.reasoning_content) > 2000 else assistant_message.reasoning_content)
+                    
+                    print("\n" + "="*50)
+                    print("Analysis Complete.")
+                    print("="*50)
+                    print(final_content)
+                    
+                    self.history.append({
+                        "role": "assistant",
+                        "content": final_content
+                    })
+                    
+                    break
             
-            print("\nAnalysis Complete.")
-            print(response)
-            
-            self.history.append({"role": "assistant", "content": response})
-            
+            if iteration >= max_iterations:
+                print(f"\n[Warning] Reached maximum iterations ({max_iterations})")
+                
         except Exception as e:
             print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
         
         # Save history at the end of the run
         self.save_history()
