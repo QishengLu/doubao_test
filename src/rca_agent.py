@@ -103,8 +103,11 @@ class RCAAgent:
         except Exception as e:
             raise Exception(f"API Call failed: {e}")
 
-    def save_history(self, output_path: str = "experiments/doubao/output.json"):
+    def save_history(self, output_path: str | None = None):
         """Save the conversation history to a JSON file."""
+        if output_path is None:
+            output_path = os.getenv("OUTPUT_FILE", "experiments/doubao/output.json")
+
         try:
             # Ensure directory exists
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
